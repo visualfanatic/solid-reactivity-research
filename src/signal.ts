@@ -60,7 +60,6 @@ interface Computation<T> extends Owner {
   updatedAt: number | null;
   pure: boolean;
   user?: boolean;
-  suspense?: SuspenseContextType;
 }
 
 interface Memo<T> extends Signal<T>, Computation<T> {
@@ -221,9 +220,7 @@ export function createEffect<T>(fn: (v?: T) => T | undefined): void;
 export function createEffect<T>(fn: (v: T) => T, value: T, options?: { name?: string }): void;
 export function createEffect<T>(fn: (v?: T) => T, value?: T, options?: { name?: string }): void {
   runEffects = runUserEffects;
-  const c = createComputation(fn, value, false, STALE, "_SOLID_DEV_" ? options : undefined),
-    s = SuspenseContext && lookup(Owner, SuspenseContext.id);
-  if (s) c.suspense = s;
+  const c = createComputation(fn, value, false, STALE, "_SOLID_DEV_" ? options : undefined);
   c.user = true;
   Effects && Effects.push(c);
 }
@@ -642,25 +639,6 @@ export function children(fn: Accessor<JSX.Element>): Accessor<JSX.Element> {
   return createMemo(() => resolveChildren(children()));
 }
 
-// Resource API
-type SuspenseContextType = {
-  increment?: () => void;
-  decrement?: () => void;
-  inFallback?: () => boolean;
-  effects?: Computation<any>[];
-  resolved?: boolean;
-};
-
-let SuspenseContext: Context<SuspenseContextType> & {
-  active?(): boolean;
-  increment?(): void;
-  decrement?(): void;
-};
-
-export function getSuspenseContext() {
-  return SuspenseContext || (SuspenseContext = createContext<SuspenseContextType>({}));
-}
-
 // Internal
 export function readSignal(this: Signal<any> | Memo<any>) {
   if (
@@ -798,8 +776,6 @@ function createComputation<T>(
 
 function runTop(node: Computation<any>) {
   if (node.state !== STALE) return (node.state = 0);
-  if (node.suspense && untrack(node.suspense.inFallback!))
-    return node!.suspense.effects!.push(node!);
   const ancestors = [node];
   while (
     (node = node.owner as Computation<any>) &&
