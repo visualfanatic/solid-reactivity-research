@@ -20,10 +20,7 @@ const UNOWNED: Owner = {
   context: null,
   owner: null
 };
-const [transPending, setTransPending] = /*@__PURE__*/ createSignal(false);
 export var Owner: Owner | null = null;
-export let Transition: Transition | null = null;
-let Scheduler: ((fn: () => void) => any) | null = null;
 let Listener: Computation<any> | null = null;
 let Pending: Signal<any>[] | null = null;
 let Updates: Computation<any>[] | null = null;
@@ -40,7 +37,6 @@ interface Signal<T> {
   observers: Computation<any>[] | null;
   observerSlots: number[] | null;
   pending: T | {};
-  tValue?: T;
   comparator?: (prev: T, next: T) => boolean;
   name?: string;
 }
@@ -58,7 +54,6 @@ interface Owner {
 interface Computation<T> extends Owner {
   fn: (v?: T) => T;
   state: number;
-  tState?: number;
   sources: Signal<T>[] | null;
   sourceSlots: number[] | null;
   value?: T;
@@ -69,18 +64,6 @@ interface Computation<T> extends Owner {
 }
 
 interface Memo<T> extends Signal<T>, Computation<T> {
-  tOwned?: Computation<any>[];
-}
-
-interface Transition {
-  sources: Set<Signal<any>>;
-  effects: Computation<any>[];
-  promises: Set<Promise<any>>;
-  disposed: Set<Computation<any>>;
-  queue: Set<Computation<any>>;
-  scheduler?: (fn: () => void) => unknown;
-  running: boolean;
-  cb: (() => void)[];
 }
 
 /**
@@ -164,9 +147,7 @@ export function createSignal<T>(
     readSignal.bind(s),
     ((value: T extends Function ? never : T | ((p?: T) => T)) => {
       if (typeof value === "function") {
-        if (Transition && Transition.running && Transition.sources.has(s))
-          value = value(s.pending !== NOTPENDING ? s.pending : s.tValue);
-        else value = value(s.pending !== NOTPENDING ? s.pending : s.value);
+        value = value(s.pending !== NOTPENDING ? s.pending : s.value);
       }
       return writeSignal(s, value);
     }) as Setter<T>
@@ -355,7 +336,7 @@ export function createSelector<T, U>(
     }
     return fn(
       key,
-      Transition && Transition.running && Transition.sources.has(node) ? node.tValue : node.value!
+      node.value!
     );
   };
 }
@@ -553,7 +534,7 @@ export function devComponent<T>(Comp: (props: T) => JSX.Element, props: T) {
   c.state = 0;
   c.componentName = Comp.name;
   updateComputation(c as Memo<JSX.Element>);
-  return c.tValue !== undefined ? c.tValue : c.value;
+  return c.value;
 }
 
 export function hashValue(v: any): string {
@@ -682,16 +663,13 @@ export function getSuspenseContext() {
 
 // Internal
 export function readSignal(this: Signal<any> | Memo<any>) {
-  const runningTransition = Transition && Transition.running;
   if (
     (this as Memo<any>).sources &&
-    ((!runningTransition && (this as Memo<any>).state) ||
-      (runningTransition && (this as Memo<any>).tState))
+    (this as Memo<any>).state
   ) {
     const updates = Updates;
     Updates = null;
-    (!runningTransition && (this as Memo<any>).state === STALE) ||
-    (runningTransition && (this as Memo<any>).tState === STALE)
+    (this as Memo<any>).state === STALE
       ? updateComputation(this as Memo<any>)
       : lookDownstream(this as Memo<any>);
     Updates = updates;
@@ -713,44 +691,31 @@ export function readSignal(this: Signal<any> | Memo<any>) {
       this.observerSlots!.push(Listener.sources.length - 1);
     }
   }
-  if (runningTransition && Transition!.sources.has(this)) return this.tValue;
   return this.value;
 }
 
 export function writeSignal(node: Signal<any> | Memo<any>, value: any, isComp?: boolean) {
   if (node.comparator) {
-    if (Transition && Transition.running && Transition.sources.has(node)) {
-      if (node.comparator(node.tValue, value)) return value;
-    } else if (node.comparator(node.value, value)) return value;
+    if (node.comparator(node.value, value)) return value;
   }
   if (Pending) {
     if (node.pending === NOTPENDING) Pending.push(node);
     node.pending = value;
     return value;
   }
-  let TransitionRunning = false;
-  if (Transition) {
-    TransitionRunning = Transition.running;
-    if (TransitionRunning || (!isComp && Transition.sources.has(node))) {
-      Transition.sources.add(node);
-      node.tValue = value;
-    }
-    if (!TransitionRunning) node.value = value;
-  } else node.value = value;
+  node.value = value;
   if (node.observers && node.observers.length) {
     runUpdates(() => {
       for (let i = 0; i < node.observers!.length; i += 1) {
         const o = node.observers![i];
-        if (TransitionRunning && Transition!.disposed.has(o)) continue;
         if (o.pure) Updates!.push(o);
         else Effects!.push(o);
         if (
           (o as Memo<any>).observers &&
-          ((TransitionRunning && !o.tState) || (!TransitionRunning && !o.state))
+          !o.state
         )
           markUpstream(o as Memo<any>);
-        if (TransitionRunning) o.tState = STALE;
-        else o.state = STALE;
+        o.state = STALE;
       }
       if (Updates!.length > 10e5) {
         Updates = [];
@@ -771,20 +736,9 @@ function updateComputation(node: Computation<any>) {
   Listener = Owner = node;
   runComputation(
     node,
-    Transition && Transition.running && Transition.sources.has(node as Memo<any>)
-      ? (node as Memo<any>).tValue
-      : node.value,
+    node.value,
     time
   );
-
-  if (Transition && !Transition.running && Transition.sources.has(node as Memo<any>)) {
-    queueMicrotask(() => {
-      runUpdates(() => {
-        Transition && (Transition.running = true);
-        runComputation(node, (node as Memo<any>).tValue, time);
-      }, false);
-    });
-  }
   Listener = listener;
   Owner = owner;
 }
@@ -799,9 +753,6 @@ function runComputation(node: Computation<any>, value: any, time: number) {
   if (!node.updatedAt || node.updatedAt <= time) {
     if ((node as Memo<any>).observers && (node as Memo<any>).observers!.length) {
       writeSignal(node as Memo<any>, nextValue, true);
-    } else if (Transition && Transition.running && node.pure) {
-      Transition.sources.add(node as Memo<any>);
-      (node as Memo<any>).tValue = nextValue;
     } else node.value = nextValue;
     node.updatedAt = time;
   }
@@ -827,37 +778,26 @@ function createComputation<T>(
     context: null,
     pure
   };
-  if (Transition && Transition.running) {
-    c.state = 0;
-    c.tState = state;
-  }
   if (Owner === null)
     "_SOLID_DEV_" &&
       console.warn(
         "computations created outside a `createRoot` or `render` will never be disposed"
       );
   else if (Owner !== UNOWNED) {
-    if (Transition && Transition.running && (Owner as Memo<T>).pure) {
-      if (!(Owner as Memo<T>).tOwned) (Owner as Memo<T>).tOwned = [c];
-      else (Owner as Memo<T>).tOwned!.push(c);
-    } else {
-      if (!Owner.owned) Owner.owned = [c];
-      else Owner.owned.push(c);
-    }
+    if (!Owner.owned) Owner.owned = [c];
+    else Owner.owned.push(c);
     if ("_SOLID_DEV_")
       c.name =
         (options && options.name) ||
         `${(Owner as Computation<any>).name || "c"}-${
-          (Owner.owned || (Owner as Memo<T>).tOwned!).length
+          (Owner.owned).length
         }`;
   }
   return c;
 }
 
 function runTop(node: Computation<any>) {
-  const runningTransition = Transition && Transition.running;
-  if (!runningTransition && node.state !== STALE) return (node.state = 0);
-  if (runningTransition && node.tState !== STALE) return (node.tState = 0);
+  if (node.state !== STALE) return (node.state = 0);
   if (node.suspense && untrack(node.suspense.inFallback!))
     return node!.suspense.effects!.push(node!);
   const ancestors = [node];
@@ -865,27 +805,17 @@ function runTop(node: Computation<any>) {
     (node = node.owner as Computation<any>) &&
     (!node.updatedAt || node.updatedAt < ExecCount)
   ) {
-    if (runningTransition && Transition!.disposed.has(node)) return;
-    if ((!runningTransition && node.state) || (runningTransition && node.tState))
+    if (node.state)
       ancestors.push(node);
   }
   for (let i = ancestors.length - 1; i >= 0; i--) {
     node = ancestors[i];
-    if (runningTransition) {
-      let top = node,
-        prev = ancestors[i + 1];
-      while ((top = top.owner as Computation<any>) && top !== prev) {
-        if (Transition!.disposed.has(top)) return;
-      }
-    }
     if (
-      (!runningTransition && node.state === STALE) ||
-      (runningTransition && node.tState === STALE)
+      node.state === STALE
     ) {
       updateComputation(node);
     } else if (
-      (!runningTransition && node.state === PENDING) ||
-      (runningTransition && node.tState === PENDING)
+      node.state === PENDING
     ) {
       const updates = Updates;
       Updates = null;
@@ -913,43 +843,11 @@ function runUpdates(fn: () => void, init: boolean) {
 
 function completeUpdates(wait: boolean) {
   if (Updates) {
-    if (Scheduler && Transition && Transition.running) scheduleQueue(Updates);
-    else runQueue(Updates);
+    runQueue(Updates);
     Updates = null;
   }
   if (wait) return;
   let cbs;
-  if (Transition && Transition.running) {
-    if (Transition.promises.size || Transition.queue.size) {
-      Transition.running = false;
-      Transition.effects.push.apply(Transition.effects, Effects!);
-      Effects = null;
-      setTransPending(true);
-      return;
-    }
-    // finish transition
-    const sources = Transition.sources;
-    cbs = Transition.cb;
-    Effects!.forEach(e => {
-      "tState" in e && (e.state = e.tState!);
-      delete e.tState;
-    });
-    Transition = null;
-    batch(() => {
-      sources.forEach(v => {
-        v.value = v.tValue;
-        if ((v as Memo<any>).owned) {
-          for (let i = 0, len = (v as Memo<any>).owned!.length; i < len; i++)
-            cleanNode((v as Memo<any>).owned![i]);
-        }
-        if ((v as Memo<any>).tOwned) (v as Memo<any>).owned = (v as Memo<any>).tOwned!;
-        delete v.tValue;
-        delete (v as Memo<any>).tOwned;
-        (v as Memo<any>).tState = 0;
-      });
-      setTransPending(false);
-    });
-  }
   if (Effects!.length)
     batch(() => {
       runEffects(Effects!);
@@ -964,28 +862,6 @@ function completeUpdates(wait: boolean) {
 
 function runQueue(queue: Computation<any>[]) {
   for (let i = 0; i < queue.length; i++) runTop(queue[i]);
-}
-
-function scheduleQueue(queue: Computation<any>[]) {
-  for (let i = 0; i < queue.length; i++) {
-    const item = queue[i];
-    const tasks = Transition!.queue;
-    if (!tasks.has(item)) {
-      tasks.add(item);
-      Scheduler!(() => {
-        tasks.delete(item);
-        runUpdates(() => {
-          Transition!.running = true;
-          runTop(item);
-          if (!tasks.size) {
-            Effects!.push.apply(Effects, Transition!.effects);
-            Transition!.effects = [];
-          }
-        }, false);
-        Transition && (Transition.running = false);
-      });
-    }
-  }
 }
 
 function runUserEffects(queue: Computation<any>[]) {
@@ -1003,18 +879,15 @@ function runUserEffects(queue: Computation<any>[]) {
 
 function lookDownstream(node: Computation<any>) {
   node.state = 0;
-  const runningTransition = Transition && Transition.running;
   for (let i = 0; i < node.sources!.length; i += 1) {
     const source = node.sources![i] as Memo<any>;
     if (source.sources) {
       if (
-        (!runningTransition && source.state === STALE) ||
-        (runningTransition && source.tState === STALE)
+        source.state === STALE
       )
         runTop(source);
       else if (
-        (!runningTransition && source.state === PENDING) ||
-        (runningTransition && source.tState === PENDING)
+        source.state === PENDING
       )
         lookDownstream(source);
     }
@@ -1022,12 +895,10 @@ function lookDownstream(node: Computation<any>) {
 }
 
 function markUpstream(node: Memo<any>) {
-  const runningTransition = Transition && Transition.running;
   for (let i = 0; i < node.observers!.length; i += 1) {
     const o = node.observers![i];
-    if ((!runningTransition && !o.state) || (runningTransition && !o.tState)) {
-      if (runningTransition) o.tState = PENDING;
-      else o.state = PENDING;
+    if (!o.state) {
+      o.state = PENDING;
       if (o.pure) Updates!.push(o);
       else Effects!.push(o);
       (o as Memo<any>).observers && markUpstream(o as Memo<any>);
@@ -1054,14 +925,7 @@ function cleanNode(node: Owner) {
     }
   }
 
-  if (Transition && Transition.running && (node as Memo<any>).pure) {
-    if ((node as Memo<any>).tOwned) {
-      for (i = 0; i < (node as Memo<any>).tOwned!.length; i++)
-        cleanNode((node as Memo<any>).tOwned![i]);
-      delete (node as Memo<any>).tOwned;
-    }
-    reset(node as Computation<any>, true);
-  } else if (node.owned) {
+  if (node.owned) {
     for (i = 0; i < node.owned.length; i++) cleanNode(node.owned[i]);
     node.owned = null;
   }
@@ -1070,19 +934,8 @@ function cleanNode(node: Owner) {
     for (i = 0; i < node.cleanups.length; i++) node.cleanups[i]();
     node.cleanups = null;
   }
-  if (Transition && Transition.running) (node as Computation<any>).tState = 0;
-  else (node as Computation<any>).state = 0;
+  (node as Computation<any>).state = 0;
   node.context = null;
-}
-
-function reset(node: Computation<any>, top?: boolean) {
-  if (!top) {
-    node.tState = 0;
-    Transition!.disposed.add(node);
-  }
-  if (node.owned) {
-    for (let i = 0; i < node.owned.length; i++) reset(node.owned[i]);
-  }
 }
 
 function handleError(err: any) {
