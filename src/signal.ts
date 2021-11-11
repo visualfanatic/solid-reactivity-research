@@ -294,45 +294,6 @@ export function createMemo<T>(
 }
 
 /**
- * Creates a reactive computation that only runs and notifies the reactive context when the browser is idle
- * ```typescript
- * export function createDeferred<T>(
- *   fn: (v: T) => T,
- *   value?: T,
- *   options?: { timeoutMs?: number, name?: string, equals?: false | ((prev: T, next: T) => boolean) }
- * ): () => T);
- * ```
- * @param fn a function that receives its previous or the initial value, if set, and returns a new value used to react on a computation
- * @param value an optional initial value for the computation; if set, fn will never receive undefined as first argument
- * @param options allows to set the timeout in milliseconds, use a custom comparison function and set a name in dev mode for debugging purposes
- *
- * @description https://www.solidjs.com/docs/latest/api#createdeferred
- */
-export function createDeferred<T>(
-  source: Accessor<T>,
-  options?: { equals?: false | ((prev: T, next: T) => boolean); name?: string; timeoutMs?: number }
-) {
-  let t: Task,
-    timeout = options ? options.timeoutMs : undefined;
-  const node = createComputation(
-    () => {
-      if (!t || !t.fn)
-        t = requestCallback(
-          () => setDeferred(() => node.value as T),
-          timeout !== undefined ? { timeout } : undefined
-        );
-      return source();
-    },
-    undefined,
-    true
-  );
-  const [deferred, setDeferred] = createSignal(node.value as T, options);
-  updateComputation(node);
-  setDeferred(() => node.value as T);
-  return deferred;
-}
-
-/**
  * Creates a conditional signal that only notifies subscribers when entering or exiting their key matching the value
  * ```typescript
  * export function createSelector<T, U>(
