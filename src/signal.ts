@@ -6,9 +6,6 @@ export type Accessor<T> = () => T;
 export type Setter<T> = undefined extends T
   ? <U extends T>(v?: (U extends Function ? never : U) | ((prev?: T) => U)) => U
   : <U extends T>(v: (U extends Function ? never : U) | ((prev: T) => U)) => U;
-export const equalFn = <T>(a: T, b: T) => a === b;
-export const $PROXY = Symbol("solid-proxy");
-const signalOptions = { equals: equalFn };
 let ERROR: symbol | null = null;
 let runEffects = runQueue;
 export const NOTPENDING = {};
@@ -37,8 +34,6 @@ interface Signal<T> {
   observers: Computation<any>[] | null;
   observerSlots: number[] | null;
   pending: T | {};
-  comparator?: (prev: T, next: T) => boolean;
-  name?: string;
 }
 
 interface Owner {
@@ -83,7 +78,6 @@ export function createRoot<T>(fn: (dispose: () => void) => T, detachedOwner?: Ow
         ? UNOWNED
         : { owned: null, cleanups: null, context: null, owner };
 
-  if ("_SOLID_DEV_" && owner) root.name = `${(owner as Computation<any>).name}-r${rootCount++}`;
   Owner = root;
   Listener = null;
   let result: T;
@@ -96,8 +90,6 @@ export function createRoot<T>(fn: (dispose: () => void) => T, detachedOwner?: Ow
   }
   return result!;
 }
-
-export type SignalOptions<T> = { name?: string; equals?: false | ((prev: T, next: T) => boolean) };
 
 /**
  * Creates a simple reactive state with a getter and setter
@@ -125,22 +117,16 @@ export type SignalOptions<T> = { name?: string; equals?: false | ((prev: T, next
 export function createSignal<T>(): [get: Accessor<T | undefined>, set: Setter<T | undefined>];
 export function createSignal<T>(
   value: T,
-  options?: { equals?: false | ((prev: T, next: T) => boolean); name?: string; internal?: boolean }
 ): [get: Accessor<T>, set: Setter<T>];
 export function createSignal<T>(
   value?: T,
-  options?: { equals?: false | ((prev: T, next: T) => boolean); name?: string; internal?: boolean }
 ): [get: Accessor<T>, set: Setter<T>] {
-  options = options ? Object.assign({}, signalOptions, options) : signalOptions;
   const s: Signal<T> = {
     value,
     observers: null,
     observerSlots: null,
     pending: NOTPENDING,
-    comparator: options.equals || undefined
   };
-  if ("_SOLID_DEV_" && !options.internal)
-    s.name = registerGraph(options.name || hashValue(value), s as { value: unknown });
 
   return [
     readSignal.bind(s),
@@ -169,9 +155,9 @@ export function createSignal<T>(
  * @description https://www.solidjs.com/docs/latest/api#createcomputed
  */
 export function createComputed<T>(fn: (v?: T) => T | undefined): void;
-export function createComputed<T>(fn: (v: T) => T, value: T, options?: { name?: string }): void;
-export function createComputed<T>(fn: (v?: T) => T, value?: T, options?: { name?: string }): void {
-  updateComputation(createComputation(fn, value, true, STALE, "_SOLID_DEV_" ? options : undefined));
+export function createComputed<T>(fn: (v: T) => T, value: T): void;
+export function createComputed<T>(fn: (v?: T) => T, value?: T): void {
+  updateComputation(createComputation(fn, value, true, STALE));
 }
 
 /**
@@ -190,14 +176,13 @@ export function createComputed<T>(fn: (v?: T) => T, value?: T, options?: { name?
  * @description https://www.solidjs.com/docs/latest/api#createrendereffect
  */
 export function createRenderEffect<T>(fn: (v?: T) => T | undefined): void;
-export function createRenderEffect<T>(fn: (v: T) => T, value: T, options?: { name?: string }): void;
+export function createRenderEffect<T>(fn: (v: T) => T, value: T): void;
 export function createRenderEffect<T>(
   fn: (v?: T) => T,
   value?: T,
-  options?: { name?: string }
 ): void {
   updateComputation(
-    createComputation(fn, value, false, STALE, "_SOLID_DEV_" ? options : undefined)
+    createComputation(fn, value, false, STALE)
   );
 }
 
@@ -217,10 +202,10 @@ export function createRenderEffect<T>(
  * @description https://www.solidjs.com/docs/latest/api#createeffect
  */
 export function createEffect<T>(fn: (v?: T) => T | undefined): void;
-export function createEffect<T>(fn: (v: T) => T, value: T, options?: { name?: string }): void;
-export function createEffect<T>(fn: (v?: T) => T, value?: T, options?: { name?: string }): void {
+export function createEffect<T>(fn: (v: T) => T, value: T): void;
+export function createEffect<T>(fn: (v?: T) => T, value?: T): void {
   runEffects = runUserEffects;
-  const c = createComputation(fn, value, false, STALE, "_SOLID_DEV_" ? options : undefined);
+  const c = createComputation(fn, value, false, STALE);
   c.user = true;
   Effects && Effects.push(c);
 }
@@ -243,30 +228,24 @@ export function createEffect<T>(fn: (v?: T) => T, value?: T, options?: { name?: 
 export function createMemo<T>(
   fn: (v?: T) => T,
   value?: undefined,
-  options?: { equals?: false | ((prev: T, next: T) => boolean); name?: string }
 ): Accessor<T>;
 export function createMemo<T>(
   fn: (v: T) => T,
   value: T,
-  options?: { equals?: false | ((prev: T, next: T) => boolean); name?: string }
 ): Accessor<T>;
 export function createMemo<T>(
   fn: (v?: T) => T,
   value?: T,
-  options?: { equals?: false | ((prev: T, next: T) => boolean); name?: string }
 ): Accessor<T> {
-  options = options ? Object.assign({}, signalOptions, options) : signalOptions;
   const c: Partial<Memo<T>> = createComputation<T>(
     fn,
     value,
     true,
     0,
-    "_SOLID_DEV_" ? options : undefined
   );
   c.pending = NOTPENDING;
   c.observers = null;
   c.observerSlots = null;
-  c.comparator = options.equals || undefined;
   updateComputation(c as Memo<T>);
   return readSignal.bind(c as Memo<T>);
 }
@@ -403,7 +382,6 @@ export function devComponent<T>(Comp: (props: T) => JSX.Element, props: T) {
   c.observers = null;
   c.observerSlots = null;
   c.state = 0;
-  c.componentName = Comp.name;
   updateComputation(c as Memo<JSX.Element>);
   return c.value;
 }
@@ -449,14 +427,6 @@ export function registerGraph(name: string, value: { value: unknown }): string {
 }
 interface GraphRecord {
   [k: string]: GraphRecord | unknown;
-}
-export function serializeGraph(owner?: Owner | null): GraphRecord {
-  owner || (owner = Owner);
-  if (!"_SOLID_DEV_" || !owner) return {};
-  return {
-    ...serializeValues(owner.sourceMap),
-    ...(owner.owned ? serializeChildren(owner) : {})
-  };
 }
 
 // Context API
@@ -547,9 +517,6 @@ export function readSignal(this: Signal<any> | Memo<any>) {
 }
 
 export function writeSignal(node: Signal<any> | Memo<any>, value: any, isComp?: boolean) {
-  if (node.comparator) {
-    if (node.comparator(node.value, value)) return value;
-  }
   if (Pending) {
     if (node.pending === NOTPENDING) Pending.push(node);
     node.pending = value;
@@ -615,7 +582,6 @@ function createComputation<T>(
   init: T | undefined,
   pure: boolean,
   state: number = STALE,
-  options?: { name?: string }
 ) {
   const c: Computation<T> = {
     fn,
@@ -638,12 +604,6 @@ function createComputation<T>(
   else if (Owner !== UNOWNED) {
     if (!Owner.owned) Owner.owned = [c];
     else Owner.owned.push(c);
-    if ("_SOLID_DEV_")
-      c.name =
-        (options && options.name) ||
-        `${(Owner as Computation<any>).name || "c"}-${
-          (Owner.owned).length
-        }`;
   }
   return c;
 }
@@ -830,26 +790,4 @@ function createProvider(id: symbol) {
 function hash(s: string) {
   for (var i = 0, h = 9; i < s.length; ) h = Math.imul(h ^ s.charCodeAt(i++), 9 ** 9);
   return `${h ^ (h >>> 9)}`;
-}
-
-function serializeValues(sources: Record<string, { value: unknown }> = {}) {
-  const k = Object.keys(sources);
-  const result: Record<string, unknown> = {};
-  for (let i = 0; i < k.length; i++) {
-    const key = k[i];
-    result[key] = sources[key].value;
-  }
-  return result;
-}
-
-function serializeChildren(root: Owner): GraphRecord {
-  const result: GraphRecord = {};
-  for (let i = 0, len = root.owned!.length; i < len; i++) {
-    const node = root.owned![i];
-    result[node.componentName ? `${node.componentName}:${node.name}` : node.name!] = {
-      ...serializeValues(node.sourceMap),
-      ...(node.owned ? serializeChildren(node) : {})
-    };
-  }
-  return result;
 }
