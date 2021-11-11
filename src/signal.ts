@@ -23,7 +23,6 @@ let Pending: Signal<any>[] | null = null;
 let Updates: Computation<any>[] | null = null;
 let Effects: Computation<any>[] | null = null;
 let ExecCount = 0;
-let rootCount = 0;
 
 declare global {
   var _$afterUpdate: () => void;
@@ -348,29 +347,6 @@ export function onError(fn: (err: any) => void): void {
   else Owner.context[ERROR].push(fn);
 }
 
-export function getListener() {
-  return Listener;
-}
-
-export function getOwner() {
-  return Owner;
-}
-
-export function runWithOwner(o: Owner, fn: () => any) {
-  const prev = Owner;
-  Owner = o;
-  try {
-    return fn();
-  } finally {
-    Owner = prev;
-  }
-}
-
-export function resumeEffects(e: Computation<any>[]) {
-  Effects!.push.apply(Effects, e);
-  e.length = 0;
-}
-
 // Dev
 export function devComponent<T>(Comp: (props: T) => JSX.Element, props: T) {
   const c: Partial<Memo<JSX.Element>> = createComputation(
@@ -413,20 +389,6 @@ export function hashValue(v: any): string {
           }) || ""
         )
   }`;
-}
-
-export function registerGraph(name: string, value: { value: unknown }): string {
-  let tryName = name;
-  if (Owner) {
-    let i = 0;
-    Owner.sourceMap || (Owner.sourceMap = {});
-    while (Owner.sourceMap[tryName]) tryName = `${name}-${++i}`;
-    Owner.sourceMap[tryName] = value;
-  }
-  return tryName;
-}
-interface GraphRecord {
-  [k: string]: GraphRecord | unknown;
 }
 
 // Context API
