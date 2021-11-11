@@ -1,6 +1,6 @@
 // Inspired by S.js[https://github.com/adamhaile/S] by Adam Haile
 import { requestCallback, Task } from "./scheduler";
-import type { JSX } from "../jsx";
+import type { JSX } from "dom-expressions/src/jsx";
 
 export type Accessor<T> = () => T;
 export type Setter<T> = undefined extends T
