@@ -1,5 +1,5 @@
-// Inspired by S.js[https://github.com/adamhaile/S] by Adam Haile
-import { requestCallback, Task } from "./scheduler";
+// Original source taken from [Solid](https://github.com/solidjs/solid) by Ryan Carniato
+// Inspired by [S.js](https://github.com/adamhaile/S) by Adam Haile
 import type { JSX } from "dom-expressions/src/jsx";
 
 export type Accessor<T> = () => T;
@@ -533,51 +533,6 @@ export function runWithOwner(o: Owner, fn: () => any) {
   } finally {
     Owner = prev;
   }
-}
-
-// Transitions
-export function enableScheduling(scheduler = requestCallback) {
-  Scheduler = scheduler;
-}
-
-export function startTransition(fn: () => void, cb?: () => void) {
-  if (Transition && Transition.running) {
-    fn();
-    cb && Transition.cb.push(cb);
-    return;
-  }
-  queueMicrotask(() => {
-    if (Scheduler || SuspenseContext) {
-      Transition ||
-        (Transition = {
-          sources: new Set(),
-          effects: [],
-          promises: new Set(),
-          disposed: new Set(),
-          queue: new Set(),
-          running: true,
-          cb: []
-        });
-      cb && Transition.cb.push(cb);
-      Transition.running = true;
-    }
-    batch(fn);
-    if (!Scheduler && !SuspenseContext && cb) cb();
-  });
-}
-
-/**
- * ```typescript
- * export function useTransition(): [
- *   () => boolean,
- *   (fn: () => void, cb?: () => void) => void
- * ];
- * @returns a tuple; first value is an accessor if the transition is pending and a callback to start the transition
- *
- * @description https://www.solidjs.com/docs/latest/api#usetransition
- */
-export function useTransition(): [Accessor<boolean>, (fn: () => void, cb?: () => void) => void] {
-  return [transPending, startTransition];
 }
 
 export function resumeEffects(e: Computation<any>[]) {
