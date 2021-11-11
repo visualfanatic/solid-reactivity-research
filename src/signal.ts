@@ -327,65 +327,6 @@ export type ReturnTypes<T> = T extends (() => any)[]
   : never;
 
 /**
- * on - make dependencies of a computation explicit
- * ```typescript
- * export function on<T extends Array<() => any> | (() => any), U>(
- *   deps: T | T[],
- *   fn: (input: T, prevInput: T, prevValue?: U) => U,
- *   options?: { defer?: boolean } = {}
- * ): (prevValue?: U) => U | undefined;
- * ```
- * @param deps list of reactive dependencies or a single reactive dependency
- * @param fn computation on input; the current previous content(s) of input and the previous value are given as arguments and it returns a new value
- * @param options optional, allows deferred computation until at the end of the next change
- * ```typescript
- * createEffect(on(a, (v) => console.log(v, b())));
- *
- * // is equivalent to:
- * createEffect(() => {
- *   const v = a();
- *   untrack(() => console.log(v, b()));
- * });
- * ```
- *
- * @description https://www.solidjs.com/docs/latest/api#on
- */
-export function on<T extends (() => any)[], U>(
-  deps: [...T],
-  fn: (input: ReturnTypes<T>, prevInput: ReturnTypes<T>, prevValue?: U) => U,
-  options?: { defer?: boolean }
-): (prevValue?: U) => U;
-export function on<T extends () => any, U>(
-  deps: T,
-  fn: (input: ReturnType<T>, prevInput: ReturnType<T>, prevValue?: U) => U,
-  options?: { defer?: boolean }
-): (prevValue?: U) => U;
-export function on<T extends (() => any) | (() => any)[], U>(
-  deps: T,
-  fn: (input: ReturnTypes<T>, prevInput: ReturnTypes<T>, prevValue?: U) => U,
-  options?: { defer?: boolean }
-): (prevValue?: U) => U {
-  const isArray = Array.isArray(deps);
-  let prevInput: ReturnTypes<T>;
-  let defer = options && options.defer;
-  return prevValue => {
-    let input: ReturnTypes<T>;
-    if (isArray) {
-      input = [] as any;
-      for (let i = 0; i < deps.length; i++) input.push((deps as Array<() => T>)[i]());
-    } else input = (deps as () => T)() as any;
-    if (defer) {
-      defer = false;
-      // this aspect of first run on deferred is hidden from end user and should not affect types
-      return undefined as unknown as U;
-    }
-    const result = untrack<U>(() => fn!(input, prevInput, prevValue));
-    prevInput = input;
-    return result;
-  };
-}
-
-/**
  * onMount - run an effect only after initial render on mount
  * @param fn an effect that should run only once on mount
  *
