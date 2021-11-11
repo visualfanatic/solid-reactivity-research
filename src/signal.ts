@@ -14,7 +14,6 @@ const PENDING = 2;
 const UNOWNED: Owner = {
   owned: null,
   cleanups: null,
-  context: null,
   owner: null
 };
 export var Owner: Owner | null = null;
@@ -39,7 +38,6 @@ interface Owner {
   owned: Computation<any>[] | null;
   cleanups: (() => void)[] | null;
   owner: Owner | null;
-  context: any | null;
   sourceMap?: Record<string, { value: unknown }>;
   name?: string;
   componentName?: string;
@@ -75,7 +73,7 @@ export function createRoot<T>(fn: (dispose: () => void) => T, detachedOwner?: Ow
     root: Owner =
       fn.length === 0 && !"_SOLID_DEV_"
         ? UNOWNED
-        : { owned: null, cleanups: null, context: null, owner };
+        : { owned: null, cleanups: null, owner };
 
   Owner = root;
   Listener = null;
@@ -329,24 +327,6 @@ export function onCleanup(fn: () => void) {
   return fn;
 }
 
-/**
- * onError - run an effect whenever an error is thrown within the context of the child scopes
- * @param fn an error handler that receives the error
- *
- * * If the error is thrown again inside the error handler, it will trigger the next available parent handler
- *
- * @description https://www.solidjs.com/docs/latest/api#onerror
- */
-export function onError(fn: (err: any) => void): void {
-  ERROR || (ERROR = Symbol("error"));
-  if (Owner === null)
-    "_SOLID_DEV_" &&
-      console.warn("error handlers created outside a `createRoot` or `render` will never be run");
-  else if (Owner.context === null) Owner.context = { [ERROR]: [fn] };
-  else if (!Owner.context[ERROR]) Owner.context[ERROR] = [fn];
-  else Owner.context[ERROR].push(fn);
-}
-
 // Dev
 export function devComponent<T>(Comp: (props: T) => JSX.Element, props: T) {
   const c: Partial<Memo<JSX.Element>> = createComputation(
@@ -389,47 +369,6 @@ export function hashValue(v: any): string {
           }) || ""
         )
   }`;
-}
-
-// Context API
-export interface Context<T> {
-  id: symbol;
-  Provider: (props: { value: T; children: any }) => any;
-  defaultValue: T;
-}
-
-/**
- * Creates a Context to handle a state scoped for the children of a component
- * ```typescript
- * interface Context<T> {
- *   id: symbol;
- *   Provider: (props: { value: T; children: any }) => any;
- *   defaultValue: T;
- * }
- * export function createContext<T>(defaultValue?: T): Context<T | undefined>;
- * ```
- * @param defaultValue optional default to inject into context
- * @returns The context that contains the Provider Component and that can be used with `useContext`
- *
- * @description https://www.solidjs.com/docs/latest/api#createcontext
- */
-export function createContext<T>(): Context<T | undefined>;
-export function createContext<T>(defaultValue: T): Context<T>;
-export function createContext<T>(defaultValue?: T): Context<T | undefined> {
-  const id = Symbol("context");
-  return { id, Provider: createProvider(id), defaultValue };
-}
-
-/**
- * use a context to receive a scoped state from a parent's Context.Provider
- *
- * @param context Context object made by `createContext`
- * @returns the current or `defaultValue`, if present
- *
- * @description https://www.solidjs.com/docs/latest/api#usecontext
- */
-export function useContext<T>(context: Context<T>): T {
-  return lookup(Owner, context.id) || context.defaultValue;
 }
 
 /**
@@ -555,7 +494,6 @@ function createComputation<T>(
     cleanups: null,
     value: init,
     owner: Owner,
-    context: null,
     pure
   };
   if (Owner === null)
@@ -707,7 +645,6 @@ function cleanNode(node: Owner) {
     node.cleanups = null;
   }
   (node as Computation<any>).state = 0;
-  node.context = null;
 }
 
 function handleError(err: any) {
@@ -718,7 +655,7 @@ function handleError(err: any) {
 
 function lookup(owner: Owner | null, key: symbol | string): any {
   return (
-    owner && ((owner.context && owner.context[key]) || (owner.owner && lookup(owner.owner, key)))
+    owner && (owner.owner && lookup(owner.owner, key))
   );
 }
 
@@ -733,20 +670,6 @@ function resolveChildren(children: JSX.Element): JSX.Element {
     return results;
   }
   return children;
-}
-
-function createProvider(id: symbol) {
-  return function provider(props: { value: unknown; children: JSX.Element }) {
-    let res;
-    createComputed(
-      () =>
-        (res = untrack(() => {
-          Owner!.context = { [id]: props.value };
-          return children(() => props.children);
-        }))
-    );
-    return res as JSX.Element;
-  };
 }
 
 function hash(s: string) {
