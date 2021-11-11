@@ -342,35 +342,6 @@ export function devComponent<T>(Comp: (props: T) => JSX.Element, props: T) {
   return c.value;
 }
 
-export function hashValue(v: any): string {
-  const s = new Set();
-  return `s${
-    typeof v === "string"
-      ? hash(v)
-      : hash(
-          JSON.stringify(v, (k, v) => {
-            if (typeof v === "object" && v != null) {
-              if (s.has(v)) return;
-              s.add(v);
-              const keys = Object.keys(v);
-              const desc = Object.getOwnPropertyDescriptors(v);
-              const newDesc = keys.reduce((memo, key) => {
-                const value = desc[key];
-                // skip getters
-                if (!value.get) memo[key] = value;
-                return memo;
-              }, {} as any);
-              v = Object.create({}, newDesc);
-            }
-            if (typeof v === "bigint") {
-              return `${v.toString()}n`;
-            }
-            return v;
-          }) || ""
-        )
-  }`;
-}
-
 /**
  * Resolves child elements to help interact with children
  *
@@ -417,7 +388,7 @@ export function readSignal(this: Signal<any> | Memo<any>) {
   return this.value;
 }
 
-export function writeSignal(node: Signal<any> | Memo<any>, value: any, isComp?: boolean) {
+export function writeSignal(node: Signal<any> | Memo<any>, value: any) {
   if (Pending) {
     if (node.pending === NOTPENDING) Pending.push(node);
     node.pending = value;
@@ -472,7 +443,7 @@ function runComputation(node: Computation<any>, value: any, time: number) {
   }
   if (!node.updatedAt || node.updatedAt <= time) {
     if ((node as Memo<any>).observers && (node as Memo<any>).observers!.length) {
-      writeSignal(node as Memo<any>, nextValue, true);
+      writeSignal(node as Memo<any>, nextValue);
     } else node.value = nextValue;
     node.updatedAt = time;
   }
@@ -670,9 +641,4 @@ function resolveChildren(children: JSX.Element): JSX.Element {
     return results;
   }
   return children;
-}
-
-function hash(s: string) {
-  for (var i = 0, h = 9; i < s.length; ) h = Math.imul(h ^ s.charCodeAt(i++), 9 ** 9);
-  return `${h ^ (h >>> 9)}`;
 }
